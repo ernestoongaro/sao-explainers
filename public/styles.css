@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap');
 * {
         box-sizing: border-box;
       }
@@ -17,52 +18,7 @@
         display: grid;
         gap: 28px;
       }
-      .legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin: 16px 0 28px;
-      }
-      .legend-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 24px;
-        margin-bottom: 24px;
-      }
-      .legend-block {
-        background: rgba(255, 255, 255, 0.8);
-        border: 1px solid rgba(15, 23, 42, 0.06);
-        border-radius: 12px;
-        padding: 16px 18px 10px;
-        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
-        min-width: 240px;
-      }
-      .legend-block h3 {
-        margin: 0 0 12px;
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #475569;
-        font-weight: 600;
-      }
-      .legend-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 14px;
-        border-radius: 999px;
-        background: #ffffff;
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
-        font-size: 14px;
-      }
-      .legend-swatch {
-        width: 16px;
-        height: 16px;
-        border-radius: 4px;
-        border: 1px solid rgba(15, 23, 42, 0.12);
-        display: inline-block;
-      }
+
       .scenario {
         background: #ffffff;
         color: #0f172a;

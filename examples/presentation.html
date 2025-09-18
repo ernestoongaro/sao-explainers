@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>dbt Labs DAG Scenarios</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #f8f9fb;
+        color: #0f172a;
+      }
+      h1 {
+        margin-top: 0;
+        color: #0f172a;
+      }
+      .grid {
+        display: grid;
+        gap: 28px;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 16px 0 28px;
+      }
+      .legend-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        margin-bottom: 24px;
+      }
+      .legend-block {
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        border-radius: 12px;
+        padding: 16px 18px 10px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+        min-width: 240px;
+      }
+      .legend-block h3 {
+        margin: 0 0 12px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #475569;
+        font-weight: 600;
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: #ffffff;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+        font-size: 14px;
+      }
+      .legend-swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        display: inline-block;
+      }
+      .scenario {
+        background: #ffffff;
+        color: #0f172a;
+        padding: 24px;
+        border-radius: 16px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+      }
+      .scenario h2 {
+        color: #fe6703;
+        margin-top: 0;
+      }
+      .scenario p {
+        color: #334155;
+        margin-bottom: 18px;
+      }
+      svg {
+        width: 100%;
+        height: 460px;
+        border-radius: 12px;
+        background: #ffffff;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>dbt Labs DAG Scenarios</h1>
+    <p>Visualizing dbt model readiness using <code>d3-dag</code>.</p>
+    <div class="legend-group">
+      <div class="legend-block">
+        <h3>Status</h3>
+        <div class="legend" id="status-legend"></div>
+      </div>
+      <div class="legend-block">
+        <h3>Layer</h3>
+        <div class="legend" id="layer-legend"></div>
+      </div>
+    </div>
+    <div class="grid" id="dag-container"></div>
+    <script type="module">
+      import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+      import * as d3dag from "https://cdn.jsdelivr.net/npm/d3-dag@1.1.0/+esm";
+
+      const {
+        graphStratify,
+        sugiyama,
+        layeringLongestPath,
+        decrossOpt,
+        coordQuad
+      } = d3dag;
+
+      const legendEntries = [
+        { status: "fresh" },
+        { status: "built" },
+        { status: "blocked" },
+        { status: "stale" },
+        { status: "sla-ok" },
+        { status: "warning" },
+        { status: "test-pass" }
+      ];
+
+      const scenarios = [
+        {
+          id: "all-built",
+          title: "Scenario 1: All Models Built",
+          description: "Everything downstream is ready for analytics.",
+          nodes: [
+            {
+              id: "src_orders",
+              label: "src_orders",
+              layer: "source",
+              status: "stale"
+            },
+            {
+              id: "src_customers",
+              label: "src_customers",
+              layer: "source",
+              status: "fresh"
+            },
+            {
+              id: "stg_orders",
+              label: "stg_orders",
+              layer: "staging",
+              status: "built"
+            },
+            {
+              id: "stg_customers",
+              label: "stg_customers",
+              layer: "staging",
+              status: "built"
+            },
+            {
+              id: "int_orders",
+              label: "int_orders",
+              layer: "intermediate",
+              status: "built"
+            },
+            {
+              id: "dim_customers",
+              label: "dim_customers",
+              layer: "dim",
+              status: "built"
+            },
+            {
+              id: "fct_orders",
+              label: "cust_orders",
+              layer: "fact",
+              status: "built"
+            }
+          ],
+          links: [
+            ["src_orders", "stg_orders"],
+            ["src_customers", "stg_customers"],
+            ["stg_orders", "int_orders"],
+            ["stg_customers", "dim_customers"],
+            ["int_orders", "fct_orders"],
+            ["dim_customers", "fct_orders"]
+          ]
+        },
+        {
+          id: "partial-build-source-down",
+          title: "Scenario 2: Partial Build (Source Down)",
+          description:
+            "Orders source offline; downstream orders models are skipped.",
+          nodes: [
+            {
+              id: "src_orders",
+              label: "src_orders",
+              layer: "source",
+              status: "stale"
+            },
+            {
+              id: "src_customers",
+              label: "src_customers",
+              layer: "source",
+              status: "fresh"
+            },
+            {
+              id: "stg_orders",
+              label: "stg_orders",
+              layer: "staging",
+              status: "skipped"
+            },
+            {
+              id: "stg_customers",
+              label: "stg_customers",
+              layer: "staging",
+              status: "built"
+            },
+            {
+              id: "int_orders",
+              label: "int_orders",
+              layer: "intermediate",
+              status: "skipped"
+            },
+            {
+              id: "dim_customers",
+              label: "dim_customers",
+              layer: "dim",
+              status: "built"
+            },
+            {
+              id: "fct_orders",
+              label: "cust_orders",
+              layer: "fact",
+              status: "built"
+            }
+          ],
+          links: [
+            ["src_orders", "stg_orders"],
+            ["src_customers", "stg_customers"],
+            ["stg_orders", "int_orders"],
+            ["stg_customers", "dim_customers"],
+            ["int_orders", "fct_orders"],
+            ["dim_customers", "fct_orders"]
+          ]
+        },
+        {
+          id: "partial-build-with-sla",
+          title: "Scenario 3: SLA-Compliant Staleness",
+          description:
+            "Customers source meets SLA, but orders source is stale, so downstream models are skipped.",
+          nodes: [
+            {
+              id: "src_orders",
+              label: "src_orders",
+              layer: "source",
+              status: "stale"
+            },
+            {
+              id: "src_customers",
+              label: "src_customers",
+              layer: "source",
+              status: "sla-ok",
+              note: "4h old (SLA 6h)"
+            },
+            {
+              id: "stg_orders",
+              label: "stg_orders",
+              layer: "staging",
+              status: "skipped"
+            },
+            {
+              id: "stg_customers",
+              label: "stg_customers",
+              layer: "staging",
+              status: "skipped"
+            },
+            {
+              id: "int_orders",
+              label: "int_orders",
+              layer: "intermediate",
+              status: "skipped"
+            },
+            {
+              id: "dim_customers",
+              label: "dim_customers",
+              layer: "dim",
+              status: "skipped"
+            },
+            {
+              id: "fct_orders",
+              label: "cust_orders",
+              layer: "fact",
+              status: "skipped"
+            }
+          ],
+          links: [
+            ["src_orders", "stg_orders"],
+            ["src_customers", "stg_customers"],
+            ["stg_orders", "int_orders"],
+            ["stg_customers", "dim_customers"],
+            ["int_orders", "fct_orders"],
+            ["dim_customers", "fct_orders"]
+          ]
+        },
+        {
+          id: "column-aware-testing",
+          title: "Scenario 4: Column-Aware Testing",
+          description:
+            "Column-aware primary key tests run once on staging and are reused for downstream marts.",
+          nodes: [
+            {
+              id: "src_customers",
+              label: "src_customers",
+              layer: "source",
+              status: "fresh"
+            },
+            {
+              id: "stg_customers",
+              label: "stg_customers",
+              layer: "staging",
+              status: "built"
+            },
+            {
+              id: "dim_customers",
+              label: "dim_customers",
+              layer: "dim",
+              status: "built"
+            },
+            {
+              id: "cust_orders",
+              label: "cust_orders",
+              layer: "fact",
+              status: "built"
+            },
+            {
+              id: "test_unique_customer_id",
+              label: "test_unique_customer_id",
+              layer: "test",
+              status: "test-pass",
+              note: "Reused for stg + dim"
+            }
+          ],
+          links: [
+            ["src_customers", "stg_customers"],
+            ["stg_customers", "dim_customers"],
+            ["dim_customers", "cust_orders"],
+            ["stg_customers", "test_unique_customer_id"],
+            ["dim_customers", "test_unique_customer_id"]
+          ]
+        }
+      ];
+
+      const statusStyles = {
+        fresh: {
+          fill: "#d1fae5",
+          text: "#03543f",
+          stroke: "#6ee7b7",
+          label: "Source fresh"
+        },
+        built: {
+          fill: "#ffe7d8",
+          text: "#7c2d12",
+          stroke: "#fe6703",
+          label: "Model built"
+        },
+        blocked: {
+          fill: "#ffe4e6",
+          text: "#9f1239",
+          stroke: "#fb7185",
+          label: "Build blocked"
+        },
+        stale: {
+          fill: "#fff7d6",
+          text: "#92400e",
+          stroke: "#fcd34d",
+          label: "Source stale"
+        },
+        "sla-ok": {
+          fill: "#ede9fe",
+          text: "#4338ca",
+          stroke: "#c4b5fd",
+          label: "Within SLA"
+        },
+        warning: {
+          fill: "#fef3c7",
+          text: "#92400e",
+          stroke: "#f59e0b",
+          label: "Downstream warning"
+        },
+        "test-pass": {
+          fill: "#dbeafe",
+          text: "#075985",
+          stroke: "#38bdf8",
+          label: "Test passed"
+        },
+        skipped: {
+          fill: "#f8fafc",
+          text: "#475569",
+          stroke: "#94a3b8",
+          label: "Skipped"
+        }
+      };
+
+      const layerStyles = {
+        source: {
+          label: "Source",
+          fill: "rgba(255, 255, 255, 0.92)",
+          text: "#0f172a"
+        },
+        staging: {
+          label: "Staging",
+          fill: "rgba(255, 255, 255, 0.92)",
+          text: "#0f172a"
+        },
+        intermediate: {
+          label: "Int",
+          fill: "rgba(255, 255, 255, 0.92)",
+          text: "#0f172a"
+        },
+        dim: {
+          label: "Mart",
+          fill: "rgba(255, 255, 255, 0.92)",
+          text: "#0f172a"
+        },
+        fact: {
+          label: "Mart",
+          fill: "rgba(255, 255, 255, 0.92)",
+          text: "#0f172a"
+        },
+        test: {
+          label: "Test",
+          fill: "rgba(219, 234, 254, 0.65)",
+          text: "#075985"
+        }
+      };
+
+      const NODE_WIDTH = 248;
+      const NODE_HEIGHT = 80;
+      const LAYER_WIDTH = 84;
+      const LAYOUT_NODE_WIDTH = NODE_HEIGHT + 72;
+      const LAYOUT_NODE_HEIGHT = NODE_WIDTH + 160;
+
+      const dagContainer = d3.select("#dag-container");
+
+      const legend = d3
+        .select("#status-legend")
+        .selectAll("div")
+        .data(legendEntries)
+        .join("div")
+        .attr("class", "legend-item");
+
+      legend
+        .append("span")
+        .attr("class", "legend-swatch")
+        .style(
+          "background",
+          (d) => statusStyles[d.status]?.fill ?? "#fe6703"
+        );
+
+      legend
+        .append("span")
+        .attr("class", "legend-label")
+        .text((d) => {
+          const style = statusStyles[d.status];
+          return style?.label ?? d.status;
+        });
+
+      const layerLegendData = Array.from(
+        new Map(
+          Object.values(layerStyles).map((value) => [value.label, value])
+        ).values()
+      );
+
+      const layerLegend = d3
+        .select("#layer-legend")
+        .selectAll("div")
+        .data(layerLegendData)
+        .join("div")
+        .attr("class", "legend-item");
+
+      layerLegend
+        .append("span")
+        .attr("class", "legend-swatch")
+        .style("background", (d) => d.fill)
+        .style("border", "1px solid rgba(15, 23, 42, 0.18)");
+
+      layerLegend
+        .append("span")
+        .attr("class", "legend-label")
+        .text((d) => d.label);
+
+      scenarios.forEach((scenario) => {
+        const nodeMeta = new Map(
+          scenario.nodes.map((node) => [node.id, node])
+        );
+
+        const getNodeMeta = (node) =>
+          nodeMeta.get(node.data?.id ?? node.data ?? node.id);
+
+        const getNodeStyle = (node) => {
+          const status = getNodeMeta(node)?.status;
+          return statusStyles[status] ?? null;
+        };
+
+        const wrapper = dagContainer
+          .append("div")
+          .attr("class", "scenario")
+          .attr("id", scenario.id);
+
+        wrapper.append("h2").text(scenario.title);
+        wrapper.append("p").text(scenario.description);
+        const svg = wrapper.append("svg");
+
+        const stratify = graphStratify()
+          .id((d) => d.id)
+          .parentIds((d) => d.parentIds ?? []);
+        const dagInput = scenario.nodes.map((node) => {
+          const parents = scenario.links
+            .filter((link) => link[1] === node.id)
+            .map((link) => link[0]);
+          return {
+            id: node.id,
+            parentIds: parents
+          };
+        });
+        const dag = stratify(dagInput);
+
+        const layout = sugiyama()
+          .layering(layeringLongestPath())
+          .decross(decrossOpt())
+          .coord(coordQuad())
+          .nodeSize([LAYOUT_NODE_WIDTH, LAYOUT_NODE_HEIGHT]);
+
+        layout(dag);
+
+        const nodes = Array.from(dag.nodes());
+        const links = Array.from(dag.links());
+        const getX = (node) => node.y;
+        const getY = (node) => node.x;
+        const xMin = d3.min(nodes, getX);
+        const xMax = d3.max(nodes, getX);
+        const yMin = d3.min(nodes, getY);
+        const yMax = d3.max(nodes, getY);
+        const horizontalPadding = 170;
+        const verticalPadding = 140;
+        const width = Math.max(720, xMax - xMin + horizontalPadding * 2);
+        const height = Math.max(440, yMax - yMin + verticalPadding * 2);
+        const offsetX = -xMin + horizontalPadding;
+        const offsetY = -yMin + verticalPadding;
+
+        svg.attr("viewBox", [0, 0, width, height]);
+
+        const defs = svg.append("defs");
+        defs
+          .append("marker")
+          .attr("id", "arrowhead")
+          .attr("viewBox", "0 -5 10 10")
+          .attr("refX", 15)
+          .attr("refY", 0)
+          .attr("markerWidth", 6)
+          .attr("markerHeight", 6)
+          .attr("orient", "auto")
+          .append("path")
+          .attr("fill", "#ea580c")
+          .attr("d", "M0,-5L10,0L0,5");
+
+        const linkLine = d3
+          .line()
+          .x((point) => point[1] + offsetX)
+          .y((point) => point[0] + offsetY)
+          .curve(d3.curveMonotoneX);
+
+        svg
+          .append("g")
+          .attr("fill", "none")
+          .attr("stroke", "#ea580c")
+          .attr("stroke-width", 3.2)
+          .attr("stroke-opacity", 0.92)
+          .attr("stroke-linecap", "round")
+          .attr("stroke-linejoin", "round")
+          .selectAll("path")
+          .data(links)
+          .join("path")
+          .attr("d", (d) => linkLine(d.points))
+          .attr("marker-end", "url(#arrowhead)");
+
+        const node = svg
+          .append("g")
+          .selectAll("g")
+          .data(nodes)
+          .join("g")
+          .attr("transform", (d) => `translate(${getX(d) + offsetX}, ${getY(d) + offsetY})`);
+
+        node
+          .append("rect")
+          .attr("x", -NODE_WIDTH / 2)
+          .attr("y", -NODE_HEIGHT / 2)
+          .attr("width", NODE_WIDTH)
+          .attr("height", NODE_HEIGHT)
+          .attr("rx", NODE_HEIGHT / 2)
+          .attr("fill", (d) => {
+            const style = getNodeStyle(d);
+            return style?.fill ?? "#ffe7d8";
+          })
+          .attr("stroke", (d) => {
+            const style = getNodeStyle(d);
+            return style?.stroke ?? "#fe6703";
+          })
+          .attr("stroke-width", 1.4);
+
+        node
+          .append("rect")
+          .attr("x", -NODE_WIDTH / 2 + 16)
+          .attr("y", -NODE_HEIGHT / 2 + 12)
+          .attr("width", 64)
+          .attr("height", 32)
+          .attr("rx", 16)
+          .attr("fill", (d) => {
+            const style = getNodeStyle(d);
+            return style?.fill ?? "#ffe7d8";
+          })
+          .attr("opacity", 0.18);
+
+        node
+          .append("text")
+          .attr("x", -NODE_WIDTH / 2 + 48)
+          .attr("y", -NODE_HEIGHT / 2 + 30)
+          .attr("text-anchor", "middle")
+          .attr("font-size", 11)
+          .attr("font-weight", 600)
+          .attr("fill", (d) => {
+            const style = getNodeStyle(d);
+            return style?.text ?? "#0f172a";
+          })
+          .text((d) => {
+            const layer = layerStyles[getNodeMeta(d)?.layer];
+            return layer?.label ?? "Layer";
+          });
+
+        const labelX = -NODE_WIDTH / 2 + 96;
+
+        node
+          .append("text")
+          .attr("x", labelX)
+          .attr("y", -4)
+          .attr("text-anchor", "start")
+          .attr("alignment-baseline", "middle")
+          .attr("font-family", "Source Sans 3, Poppins, sans-serif")
+          .attr("font-size", 16)
+          .attr("font-weight", 600)
+          .attr("fill", "#0f172a")
+          .text((d) => {
+            const label = getNodeMeta(d)?.label;
+            const fallbackId = d.data?.id ?? d.data ?? d.id;
+            return label ?? fallbackId;
+          });
+
+        node
+          .append("text")
+          .attr("x", labelX)
+          .attr("y", 14)
+          .attr("text-anchor", "start")
+          .attr("alignment-baseline", "middle")
+          .attr("font-size", 12)
+          .attr("font-weight", 500)
+          .attr("fill", (d) => {
+            const style = getNodeStyle(d);
+            return style?.text ?? "#475569";
+          })
+          .text((d) => {
+            const status = getNodeMeta(d)?.status;
+            const style = statusStyles[status];
+            return style?.label ?? status ?? "";
+          });
+
+        node
+          .append("text")
+          .attr("x", labelX)
+          .attr("y", 32)
+          .attr("text-anchor", "start")
+          .attr("alignment-baseline", "middle")
+          .attr("font-size", 11)
+          .attr("fill", "#64748b")
+          .attr("opacity", (d) => (getNodeMeta(d)?.note ? 1 : 0))
+          .text((d) => getNodeMeta(d)?.note ?? "");
+      });
+    </script>
+  </body>
+</html>

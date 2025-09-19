@@ -9,6 +9,106 @@ const {
   coordQuad
 } = d3dag;
 
+const FONT_URL_REGEX = /url\((['"]?)(?!data:)([^'"\)]+?\.(?:woff2?|ttf))\1\)/gi;
+const FONT_FACE_BLOCK_REGEX = /@font-face\s*{[^}]*}/gi;
+const FONT_PROP_REGEX = /([\w-]+)\s*:\s*([^;]+);/g;
+
+const loadedFontKeys = new Set();
+
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
+}
+
+function getFontMimeType(url) {
+  const normalized = url.split("?")[0].split("#")[0].toLowerCase();
+  if (normalized.endsWith(".woff2")) return "font/woff2";
+  if (normalized.endsWith(".woff")) return "font/woff";
+  if (normalized.endsWith(".ttf")) return "font/ttf";
+  return "application/octet-stream";
+}
+
+async function inlineFontSources(cssText) {
+  const matches = Array.from(cssText.matchAll(FONT_URL_REGEX));
+  if (!matches.length) return cssText;
+
+  const urlToDataUri = new Map();
+  await Promise.all(
+    matches.map(async (match) => {
+      const url = match[2];
+      if (urlToDataUri.has(url)) return;
+      try {
+        const absoluteUrl = new URL(url, window.location.href).href;
+        const response = await fetch(absoluteUrl);
+        if (!response.ok) return;
+        const fontBuffer = await response.arrayBuffer();
+        const base64Font = arrayBufferToBase64(fontBuffer);
+        const mimeType = getFontMimeType(url);
+        urlToDataUri.set(url, `data:${mimeType};base64,${base64Font}`);
+      } catch (err) {
+        console.warn("Failed to inline font", url, err);
+      }
+    })
+  );
+
+  return cssText.replace(FONT_URL_REGEX, (match, quote, url) => {
+    const dataUri = urlToDataUri.get(url);
+    return dataUri ? `url(${quote}${dataUri}${quote})` : match;
+  });
+}
+
+function cleanCssValue(value) {
+  return value.trim().replace(/^['"]|['"]$/g, "");
+}
+
+async function ensureEmbeddedFontsLoaded(cssText) {
+  if (typeof FontFace === "undefined") return;
+  const blocks = cssText.match(FONT_FACE_BLOCK_REGEX);
+  if (!blocks) return;
+
+  const fontPromises = blocks.map(async (block) => {
+    const descriptors = {};
+    let family = null;
+    let src = null;
+
+    block.replace(FONT_PROP_REGEX, (_, prop, value) => {
+      const key = prop.toLowerCase();
+      if (key === "font-family") {
+        family = cleanCssValue(value);
+      } else if (key === "src") {
+        src = value.trim();
+      } else if (key === "font-style" || key === "font-weight" || key === "font-stretch") {
+        descriptors[key.replace("font-", "")] = cleanCssValue(value);
+      }
+      return "";
+    });
+
+    if (!family || !src) return;
+
+    if (/url\((['"]?)data:/i.test(src)) return;
+
+    const fontKey = `${family}|${descriptors.style ?? "normal"}|${descriptors.weight ?? "400"}|${src}`;
+    if (loadedFontKeys.has(fontKey)) return;
+
+    try {
+      const fontFace = new FontFace(family, src, descriptors);
+      await fontFace.load();
+      document.fonts.add(fontFace);
+      loadedFontKeys.add(fontKey);
+    } catch (err) {
+      console.warn("Failed to load embedded font", family, err);
+    }
+  });
+
+  await Promise.all(fontPromises);
+}
+
 async function exportDagAsPng(svgNode, filename) {
   if (!svgNode) return;
 
@@ -24,6 +124,9 @@ async function exportDagAsPng(svgNode, filename) {
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
 
+  // Strip foreignObject nodes to avoid canvas tainting during PNG export
+  clone.querySelectorAll("foreignObject").forEach((node) => node.remove());
+
   const vb = svgNode.viewBox?.baseVal;
   const rect = svgNode.getBoundingClientRect();
   let width = (vb && vb.width) || rect.width || svgNode.clientWidth || 640;
@@ -32,11 +135,12 @@ async function exportDagAsPng(svgNode, filename) {
   clone.setAttribute("width", width);
   clone.setAttribute("height", height);
 
-  const inlineCss = exportedStyles || (await exportedStylesPromise.catch(() => ''));
+  const inlineCss = exportedStyles || (await exportedStylesPromise.catch(() => ""));
+  await ensureEmbeddedFontsLoaded(inlineCss);
   if (inlineCss) {
     const styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
     styleEl.setAttribute("type", "text/css");
-    styleEl.innerHTML = inlineCss;
+    styleEl.textContent = inlineCss;
     clone.insertBefore(styleEl, clone.firstChild);
   }
 
@@ -84,7 +188,7 @@ URL.revokeObjectURL(downloadUrl);
 let exportedStyles = '';
 const exportedStylesPromise = (async () => {
   try {
-    let cssText = await (await fetch('styles.css')).text();
+    let cssText = await (await fetch("styles.css")).text();
     const importRegex = /@import\s+url\(['"]?(.*?)['"]?\);/g;
     const importUrls = [];
     cssText = cssText.replace(importRegex, (_, url) => {
@@ -92,13 +196,19 @@ importUrls.push(url);
 return '';
     });
     const importedCss = await Promise.all(
-importUrls.map((url) =>
-  fetch(url)
-    .then((res) => res.text())
-    .catch(() => '')
-)
+      importUrls.map(async (url) => {
+        try {
+          const res = await fetch(url);
+          const text = await res.text();
+          return inlineFontSources(text);
+        } catch (err) {
+          console.warn("Failed to load imported stylesheet", url, err);
+          return "";
+        }
+      })
     );
-    exportedStyles = [...importedCss, cssText].join('\n');
+    const mainCss = await inlineFontSources(cssText);
+    exportedStyles = [...importedCss, mainCss].join("\n");
     return exportedStyles;
   } catch (err) {
     console.warn('Failed to load styles for export', err);
@@ -239,7 +349,9 @@ const scenarios = [
   label: "src_customers",
   layer: "source",
   status: "sla-ok",
-  note: "4h old (SLA 6h)"
+  note: "4h old (SLA 6h)",
+  notePlacement: "below",
+  noteFontSize: 13
 },
 {
   id: "stg_orders",
@@ -251,7 +363,8 @@ const scenarios = [
   id: "stg_customers",
   label: "stg_customers",
   layer: "staging",
-  status: "reusable"
+  status: "reusable",
+  note: "Within SLA"
 },
 {
   id: "int_orders",
@@ -263,7 +376,8 @@ const scenarios = [
   id: "dim_customers",
   label: "dim_customers",
   layer: "dim",
-  status: "reusable"
+  status: "reusable",
+  note: "Within SLA"
 },
 {
   id: "fct_orders",
@@ -285,39 +399,39 @@ const scenarios = [
     id: "column-aware-testing",
     title: "Scenario 4: Column-Aware Testing",
     description:
-"Column-aware primary key tests defined on staging are reused for downstream dims without re-running per model.",
+      "Column-aware unique tests defined on staging are reused for downstream dims without re-running per model.",
     nodes: [
-{
-  id: "src_customers",
-  label: "src_customers",
-  layer: "source",
-  status: "fresh"
-},
-{
-  id: "stg_customers",
-  label: "stg_customers",
-  layer: "staging",
-  status: "built"
-},
-{
-  id: "dim_customers",
-  label: "dim_customers",
-  layer: "dim",
-  status: "built"
-},
-{
-  id: "test_unique_customer_id",
-  label: "test_unique_customer_id",
-  layer: "test",
-  status: "reusable",
-  note: "Reused for stg + dim"
-}
+      {
+        id: "src_customers",
+        label: "src_customers",
+        layer: "source",
+        status: "fresh",
+        note: "Raw feed with unique test on column customer_id",
+        notePlacement: "below",
+        noteFontSize: 13
+      },
+      {
+        id: "stg_customers",
+        label: "stg_customers",
+        layer: "staging",
+        status: "built",
+        statusLabel: "Test ran",
+        note: "Column-aware unique test runs here",
+        notePlacement: "below"
+      },
+      {
+        id: "dim_customers",
+        label: "dim_customers",
+        layer: "dim",
+        status: "reusable",
+        statusLabel: "Test reused",
+        note: "Reuses staging unique test",
+        notePlacement: "below"
+      }
     ],
     links: [
-["src_customers", "stg_customers"],
-["stg_customers", "dim_customers"],
-["stg_customers", "test_unique_customer_id"],
-["dim_customers", "test_unique_customer_id"]
+      ["src_customers", "stg_customers"],
+      ["stg_customers", "dim_customers"]
     ]
   }
 ];
@@ -408,6 +522,7 @@ const layerStyles = {
 
 const NODE_WIDTH = 248;
 const NODE_HEIGHT = 80;
+const TEST_NODE_HEIGHT = 170; // Much taller for test nodes
 const LAYER_WIDTH = 84;
 const LAYOUT_NODE_WIDTH = NODE_HEIGHT + 220;
 const LAYOUT_NODE_HEIGHT = NODE_WIDTH + 60;
@@ -429,6 +544,7 @@ scenarios.forEach((scenario) => {
 
   const getLayer = (node) => getNodeMeta(node)?.layer;
   const isTestLayer = (node) => getLayer(node) === "test";
+  const noteBelow = (node) => getNodeMeta(node)?.notePlacement === "below";
 
   const wrapper = dagContainer
     .append("div")
@@ -487,9 +603,9 @@ if (scenario.id === "column-aware-testing") {
     const rowNodes = stagingNodes.concat(dimNodes);
 
     if (rowNodes.length) {
-      const targetY = d3.mean(rowNodes, (n) => n.y);
+      const targetX = d3.mean(rowNodes, (n) => n.x);
       rowNodes.forEach((n) => {
-        n.y = targetY;
+        n.x = targetX;
       });
     }
 
@@ -497,12 +613,12 @@ if (scenario.id === "column-aware-testing") {
       (n) => getNodeMeta(n)?.id === "test_unique_customer_id"
     );
     if (testNode) {
-      const rowY = rowNodes.length ? rowNodes[0].y : testNode.y;
-      const minX = rowNodes.length ? d3.min(rowNodes, (n) => n.x) : testNode.x;
-      const maxX = rowNodes.length ? d3.max(rowNodes, (n) => n.x) : testNode.x;
-      const centerX = (minX + maxX) / 2;
-      testNode.x = centerX;
-      testNode.y = rowY - LAYOUT_NODE_HEIGHT * 0.9;
+      const rowX = rowNodes.length ? rowNodes[0].x : testNode.x;
+      const minY = rowNodes.length ? d3.min(rowNodes, (n) => n.y) : testNode.y;
+      const maxY = rowNodes.length ? d3.max(rowNodes, (n) => n.y) : testNode.y;
+      const centerY = (minY + maxY) / 2;
+      testNode.y = centerY;
+      testNode.x = rowX - LAYOUT_NODE_HEIGHT * 0.9;
     }
   }
 
@@ -600,17 +716,17 @@ isTestLayer(d.target) ? "12 6" : null
   node
     .append("rect")
     .attr("x", -NODE_WIDTH / 2)
-    .attr("y", -NODE_HEIGHT / 2)
+    .attr("y", (d) => isTestLayer(d) ? -TEST_NODE_HEIGHT / 2 : -NODE_HEIGHT / 2)
     .attr("width", NODE_WIDTH)
-    .attr("height", NODE_HEIGHT)
+    .attr("height", (d) => isTestLayer(d) ? TEST_NODE_HEIGHT : NODE_HEIGHT)
     .attr("rx", (d) => (isTestLayer(d) ? 18 : NODE_HEIGHT / 2))
     .attr("fill", (d) => {
-const style = getNodeStyle(d);
-return style?.fill ?? "#ffe7d8";
+      const style = getNodeStyle(d);
+      return style?.fill ?? "#ffe7d8";
     })
     .attr("stroke", (d) => {
-const style = getNodeStyle(d);
-return style?.stroke ?? "#fe6703";
+      const style = getNodeStyle(d);
+      return style?.stroke ?? "#fe6703";
     })
     .attr("stroke-width", 1.4);
 
@@ -641,8 +757,9 @@ return style?.fill ?? "#ffe7d8";
   nonTestNodes
     .append("text")
     .attr("x", -NODE_WIDTH / 2 + 48)
-    .attr("y", -NODE_HEIGHT / 2 + 30)
+    .attr("y", -NODE_HEIGHT / 2 + 28)
     .attr("text-anchor", "middle")
+    .attr("alignment-baseline", "middle")
     .attr("font-size", 11)
     .attr("font-weight", 600)
     .attr("fill", (d) => {
@@ -656,9 +773,12 @@ return layer?.label ?? "Layer";
 
   const testNodes = node.filter(isTestLayer);
 
-  const testLabelOffset = -NODE_HEIGHT / 2 + 24;
-  const testNameOffset = testLabelOffset + 42;
-  const testNoteOffset = testNameOffset + 30;
+  // Center the text block vertically in the test node
+  const testBlockHeight = 80; // total height of label+name+note
+  const testBlockStart = -TEST_NODE_HEIGHT / 2 + (TEST_NODE_HEIGHT - testBlockHeight) / 2;
+  const testLabelOffset = testBlockStart + 0;
+  const testNameOffset = testBlockStart + 36;
+  const testNoteOffset = testBlockStart + 72;
 
   testNodes
     .append("text")
@@ -677,15 +797,17 @@ isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
     )
     .attr("y", (d) => (isTestLayer(d) ? testNameOffset : -4))
     .attr("text-anchor", "start")
-    .attr("alignment-baseline", "middle")
+    .attr("alignment-baseline", (d) =>
+      isTestLayer(d) ? "hanging" : "middle"
+    )
     .attr("font-family", "Source Sans 3, Poppins, sans-serif")
     .attr("font-size", 16)
-    .attr("font-weight", 600)
+    .attr("font-weight", 400)
     .attr("fill", "#0f172a")
     .text((d) => {
-const label = getNodeMeta(d)?.label;
-const fallbackId = d.data?.id ?? d.data ?? d.id;
-return label ?? fallbackId;
+      const label = getNodeMeta(d)?.label;
+      const fallbackId = d.data?.id ?? d.data ?? d.id;
+      return label ?? fallbackId;
     });
 
   node
@@ -693,31 +815,71 @@ return label ?? fallbackId;
     .attr("x", (d) =>
 isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
     )
-    .attr("y", (d) => (isTestLayer(d) ? testNameOffset + 30 : 14))
+    .attr("y", (d) => (isTestLayer(d) ? testNoteOffset - 24 : 14))
     .attr("text-anchor", "start")
-    .attr("alignment-baseline", "middle")
-    .attr("font-size", 12)
+    .attr("alignment-baseline", (d) =>
+      isTestLayer(d) ? "hanging" : "middle"
+    )
+    .attr("font-size", 13)
     .attr("font-weight", 500)
     .attr("fill", (d) => {
-const style = getNodeStyle(d);
-return style?.text ?? "#475569";
+      const style = getNodeStyle(d);
+      return style?.text ?? "#475569";
     })
     .text((d) => {
-const status = getNodeMeta(d)?.status;
-const style = statusStyles[status];
-return style?.label ?? status ?? "";
+      const meta = getNodeMeta(d);
+      const status = meta?.status;
+      const customLabel = meta?.statusLabel;
+      const style = statusStyles[status];
+      return customLabel ?? style?.label ?? status ?? "";
     });
 
   node
     .append("text")
     .attr("x", (d) =>
-isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
+isTestLayer(d)
+        ? -NODE_WIDTH / 2 + 24
+        : noteBelow(d)
+        ? 0
+        : -NODE_WIDTH / 2 + 96
     )
-    .attr("y", (d) => (isTestLayer(d) ? testNoteOffset : 32))
-    .attr("text-anchor", "start")
-    .attr("alignment-baseline", "middle")
-    .attr("font-size", 11)
+    .attr("y", (d) =>
+      isTestLayer(d)
+        ? testNoteOffset
+        : noteBelow(d)
+        ? NODE_HEIGHT / 2 + 20
+        : 32
+    )
+    .attr("text-anchor", (d) =>
+      isTestLayer(d) ? "start" : noteBelow(d) ? "middle" : "start"
+    )
+    .attr("alignment-baseline", (d) =>
+      isTestLayer(d)
+        ? "middle"
+        : noteBelow(d)
+        ? "hanging"
+        : "middle"
+    )
+    .attr("font-size", (d) => {
+      const meta = getNodeMeta(d);
+      return meta?.noteFontSize ?? (noteBelow(d) ? 13 : 11);
+    })
     .attr("fill", "#64748b")
     .attr("opacity", (d) => (getNodeMeta(d)?.note ? 1 : 0))
+    .text((d) => getNodeMeta(d)?.note ?? "");
+  node
+    .append("foreignObject")
+    .attr("x", (d) => isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96)
+    .attr("y", (d) => (isTestLayer(d) ? testNoteOffset : 32))
+    .attr("width", 180)
+    .attr("height", 40)
+    .attr("opacity", (d) => (getNodeMeta(d)?.note ? 1 : 0))
+    .filter(isTestLayer)
+    .append("xhtml:div")
+    .style("font-size", "12px")
+    .style("color", "#64748b")
+    .style("font-family", "Source Sans 3, Poppins, sans-serif")
+    .style("line-height", "1.3")
+    .style("word-break", "break-word")
     .text((d) => getNodeMeta(d)?.note ?? "");
 });

@@ -754,12 +754,13 @@ return style?.fill ?? "#ffe7d8";
     .attr("stroke", "rgba(15, 23, 42, 0.12)")
     .attr("stroke-width", 1);
 
-  nonTestNodes
+  const layerBadgeCenterY = -NODE_HEIGHT / 2 + 12 + 16;
+  const layerLabels = nonTestNodes
     .append("text")
+    .attr("class", "layer-label")
     .attr("x", -NODE_WIDTH / 2 + 48)
-    .attr("y", -NODE_HEIGHT / 2 + 28)
+    .attr("y", -NODE_HEIGHT / 2 + 12)
     .attr("text-anchor", "middle")
-    .attr("alignment-baseline", "middle")
     .attr("font-size", 11)
     .attr("font-weight", 600)
     .attr("fill", (d) => {
@@ -770,6 +771,14 @@ return layer?.text ?? "#0f172a";
 const layer = layerStyles[getLayer(d)];
 return layer?.label ?? "Layer";
     });
+
+  layerLabels.each(function () {
+    const textNode = d3.select(this);
+    const bbox = this.getBBox();
+    const currentCenter = bbox.y + bbox.height / 2;
+    const offset = layerBadgeCenterY - currentCenter;
+    textNode.attr("dy", offset);
+  });
 
   const testNodes = node.filter(isTestLayer);
 

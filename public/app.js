@@ -545,6 +545,11 @@ scenarios.forEach((scenario) => {
   const getLayer = (node) => getNodeMeta(node)?.layer;
   const isTestLayer = (node) => getLayer(node) === "test";
   const noteBelow = (node) => getNodeMeta(node)?.notePlacement === "below";
+  const reusedCount = scenario.nodes.reduce(
+    (total, node) => (node.status === "reusable" ? total + 1 : total),
+    0
+  );
+  const isTestScenario = scenario.id === "column-aware-testing";
 
   const wrapper = dagContainer
     .append("div")
@@ -891,4 +896,42 @@ isTestLayer(d)
     .style("line-height", "1.3")
     .style("word-break", "break-word")
     .text((d) => getNodeMeta(d)?.note ?? "");
+
+  const callout = wrapper
+    .append("div")
+    .attr("class", "scenario-callout");
+
+  callout.append("div").attr("class", "callout-count").text(reusedCount);
+
+  const calloutBody = callout.append("div").attr("class", "callout-body");
+
+  const calloutTitle = isTestScenario ? "Tests reused" : "Models reused";
+
+  calloutBody
+    .append("span")
+    .attr("class", "callout-title")
+    .text(calloutTitle);
+
+  let calloutMessage;
+  if (isTestScenario) {
+    if (reusedCount === 0) {
+      calloutMessage = "No tests were reused in this run";
+    } else if (reusedCount === 1) {
+      calloutMessage = "Fusion skipped one test";
+    } else {
+      calloutMessage = `Fusion skipped ${reusedCount} tests`;
+    }
+  } else {
+    calloutMessage =
+      reusedCount === 0
+        ? "No models were reused in this run"
+        : reusedCount === 1
+        ? "Fusion skipped rebuilding 1 model"
+        : `Fusion skipped rebuilding ${reusedCount} models`;
+  }
+
+  calloutBody
+    .append("span")
+    .attr("class", "callout-subtitle")
+    .text(calloutMessage);
 });

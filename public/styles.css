@@ -57,6 +57,9 @@
         border-radius: 16px;
         border: 1px solid rgba(15, 23, 42, 0.08);
         box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
       }
       .scenario-controls {
         display: flex;
@@ -85,6 +88,64 @@
         color: #334155;
         margin-bottom: 18px;
       }
+      .scenario-body {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 12px;
+        align-items: center;
+      }
+      .scenario-trigger {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(37, 99, 235, 0.15);
+        background: rgba(219, 234, 254, 0.45);
+        justify-self: center;
+      }
+      .trigger-icon {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        color: #1d4ed8;
+        min-width: 48px;
+      }
+      .trigger-icon img {
+        width: 28px;
+        height: 28px;
+      }
+      .trigger-label {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .trigger-files {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        color: #1e293b;
+      }
+      .trigger-title {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: #1d4ed8;
+      }
+      .trigger-file-list {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 13px;
+        color: #334155;
+      }
+      .trigger-file-list li {
+        margin: 0;
+        line-height: 1.35;
+        word-break: break-all;
+      }
       .scenario-callout {
         display: flex;
         align-items: center;
@@ -94,6 +155,17 @@
         background: linear-gradient(135deg, rgba(224, 242, 254, 0.84), rgba(219, 234, 254, 0.9));
         border: 1px solid rgba(37, 99, 235, 0.24);
         border-radius: 14px;
+      }
+      @media (max-width: 900px) {
+        .scenario-body {
+          grid-template-columns: 1fr;
+          gap: 16px;
+          align-items: stretch;
+        }
+        .scenario-trigger {
+          justify-self: stretch;
+          justify-content: flex-start;
+        }
       }
       .callout-count {
         display: flex;
@@ -126,10 +198,11 @@
         font-weight: 500;
         color: #0f172a;
       }
-      svg {
+      .scenario-body svg {
         width: 100%;
         height: 520px;
         border-radius: 12px;
         background: #ffffff;
         border: 1px solid rgba(15, 23, 42, 0.06);
+        align-self: stretch;
       }

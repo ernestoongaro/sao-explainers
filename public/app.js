@@ -451,6 +451,152 @@ const scenarios = [
       ["src_customers", "stg_customers"],
       ["stg_customers", "dim_customers"]
     ]
+  },
+  {
+    id: "slim-ci",
+    title: "Scenario 5: Slim CI (Table-aware builds)",
+    description:
+      "Slim CI rebuilds only the tables touched in a pull request while reusing the unaffected downstream assets.",
+    trigger: {
+      type: "pr",
+      files: ["stg_orders.sql"]
+    },
+    nodes: [
+      {
+        id: "stg_orders",
+        label: "stg_orders",
+        layer: "staging",
+        status: "built",
+        note: "Model changed in PR - Slim CI rebuilds it",
+        notePlacement: "below"
+      },
+      {
+        id: "stg_customers",
+        label: "stg_customers",
+        layer: "staging",
+        status: "reusable",
+        note: "No table edits detected",
+        notePlacement: "below"
+      },
+      {
+        id: "int_orders",
+        label: "int_orders",
+        layer: "intermediate",
+        status: "built",
+        note: "Downstream of the changed model",
+        notePlacement: "below"
+      },
+      {
+        id: "dim_customers",
+        label: "dim_customers",
+        layer: "dim",
+        status: "reusable",
+        note: "Slim CI reuses cached dim",
+        notePlacement: "below"
+      },
+      {
+        id: "fct_orders",
+        label: "cust_orders",
+        layer: "fact",
+        status: "built",
+        note: "Builds off changed staging table",
+        notePlacement: "below"
+      }
+    ],
+    links: [
+      ["stg_orders", "int_orders"],
+      ["stg_customers", "dim_customers"],
+      ["int_orders", "fct_orders"],
+      ["dim_customers", "fct_orders"]
+    ]
+  },
+  {
+    id: "slimmer-ci",
+    title: "Scenario 6: Slimmer CI (Table + Column awareness)",
+    description:
+      "Fusion inspects column lineage so only models that touch the changed column rebuild while all other dependents are reused.",
+    trigger: {
+      type: "pr",
+      files: ["stg_orders.sql", "int_orders.sql"]
+    },
+    nodeWidth: 288,
+    nodes: [
+      {
+        id: "stg_orders",
+        label: "stg_orders",
+        layer: "staging",
+        status: "built",
+        note: "PR adds rush_delivery_flag column",
+        notePlacement: "below",
+        columns: [
+          { name: "order_id", isKey: true },
+          { name: "customer_id" },
+          { name: "order_total" },
+          { name: "rush_delivery_flag", isNew: true }
+        ]
+      },
+      {
+        id: "int_orders",
+        label: "int_orders",
+        layer: "intermediate",
+        status: "built",
+        note: "Consumes rush_delivery_flag",
+        notePlacement: "below",
+        columns: [
+          { name: "order_id", isKey: true },
+          { name: "customer_id" },
+          { name: "order_total" },
+          { name: "rush_delivery_flag", isNew: true }
+        ]
+      },
+      {
+        id: "fct_shipping",
+        label: "fct_shipping",
+        layer: "fact",
+        status: "reusable",
+        note: "Doesn't select rush_delivery_flag",
+        notePlacement: "below",
+        columns: [
+          { name: "order_id" },
+          { name: "ship_speed_bucket" },
+          { name: "delivery_eta" }
+        ]
+      },
+      {
+        id: "dim_bookings",
+        label: "dim_bookings",
+        layer: "dim",
+        status: "reusable",
+        note: "Doesn't select rush_delivery_flag",
+        notePlacement: "below",
+        columns: [
+          { name: "order_id", isKey: true },
+          { name: "customer_id" },
+          { name: "order_total" },
+          { name: "gross_booking_value" }
+        ]
+      },
+      {
+        id: "fct_finance",
+        label: "fct_finance",
+        layer: "fact",
+        status: "reusable",
+        note: "Doesn't select rush_delivery_flag",
+        notePlacement: "below",
+        columns: [
+          { name: "order_id" },
+          { name: "customer_id" },
+          { name: "order_total" },
+          { name: "reporting_month" }
+        ]
+      }
+    ],
+    links: [
+      ["stg_orders", "int_orders"],
+      ["stg_orders", "dim_bookings"],
+      ["int_orders", "fct_shipping"],
+      ["dim_bookings", "fct_finance"]
+    ]
   }
 ];
 
@@ -544,7 +690,6 @@ const COLUMN_TABLE_EXTRA_HEIGHT = 48;
 const TEST_NODE_HEIGHT = 170; // Much taller for test nodes
 const LAYER_WIDTH = 84;
 const LAYOUT_NODE_WIDTH = NODE_HEIGHT + 220;
-const LAYOUT_NODE_HEIGHT = NODE_WIDTH + 60;
 
 const dagContainer = d3.select("#dag-container");
 
@@ -575,6 +720,9 @@ scenarios.forEach((scenario) => {
     0
   );
   const isTestScenario = scenario.id === "column-aware-testing";
+  const nodeWidth = scenario.nodeWidth ?? NODE_WIDTH;
+  const halfNodeWidth = nodeWidth / 2;
+  const layoutNodeHeight = nodeWidth + 60;
 
   const wrapper = dagContainer
     .append("div")
@@ -600,7 +748,52 @@ if (svg) {
 
   wrapper.append("h2").text(scenario.title);
   wrapper.append("p").text(scenario.description);
-  svg = wrapper.append("svg");
+
+  const body = wrapper
+    .append("div")
+    .attr("class", "scenario-body");
+
+  if (scenario.trigger?.type === "pr") {
+    const trigger = body
+      .append("div")
+      .attr("class", "scenario-trigger");
+
+    const iconBox = trigger
+      .append("div")
+      .attr("class", "trigger-icon");
+
+    iconBox
+      .append("img")
+      .attr("src", "icons/pr.svg")
+      .attr("alt", "Pull request trigger")
+      .attr("width", 40)
+      .attr("height", 40)
+      .attr("loading", "lazy");
+
+    iconBox
+      .append("span")
+      .attr("class", "trigger-label")
+      .text("Edited in PR");
+
+    const filesBox = trigger
+      .append("div")
+      .attr("class", "trigger-files");
+
+    filesBox
+      .append("span")
+      .attr("class", "trigger-title")
+      .text("Changed files");
+
+    const filesList = filesBox
+      .append("ul")
+      .attr("class", "trigger-file-list");
+
+    (scenario.trigger.files ?? []).forEach((file) => {
+      filesList.append("li").text(file);
+    });
+  }
+
+  svg = body.append("svg");
 
   const stratify = graphStratify()
     .id((d) => d.id)
@@ -620,7 +813,7 @@ parentIds: parents
     .layering(layeringLongestPath())
     .decross(decrossOpt())
     .coord(coordQuad())
-    .nodeSize([LAYOUT_NODE_WIDTH, LAYOUT_NODE_HEIGHT]);
+    .nodeSize([LAYOUT_NODE_WIDTH, layoutNodeHeight]);
 
   layout(dag);
 
@@ -648,7 +841,7 @@ if (scenario.id === "column-aware-testing") {
       const maxY = rowNodes.length ? d3.max(rowNodes, (n) => n.y) : testNode.y;
       const centerY = (minY + maxY) / 2;
       testNode.y = centerY;
-      testNode.x = rowX - LAYOUT_NODE_HEIGHT * 0.9;
+      testNode.x = rowX - layoutNodeHeight * 0.9;
     }
   }
 
@@ -745,9 +938,9 @@ isTestLayer(d.target) ? "12 6" : null
 
   node
     .append("rect")
-    .attr("x", -NODE_WIDTH / 2)
+    .attr("x", -halfNodeWidth)
     .attr("y", (d) => -getNodeHeight(d) / 2)
-    .attr("width", NODE_WIDTH)
+    .attr("width", nodeWidth)
     .attr("height", (d) => getNodeHeight(d))
     .attr("rx", (d) => (isTestLayer(d) ? 18 : getNonTestNodeHeight(d) / 2))
     .attr("fill", (d) => {
@@ -764,7 +957,7 @@ isTestLayer(d.target) ? "12 6" : null
 
   nonTestNodes
     .append("rect")
-    .attr("x", -NODE_WIDTH / 2 + 16)
+    .attr("x", -halfNodeWidth + 16)
     .attr("y", (d) => -getNonTestNodeHeight(d) / 2 + 12)
     .attr("width", 64)
     .attr("height", 32)
@@ -777,8 +970,8 @@ return style?.fill ?? "#ffe7d8";
 
   nonTestNodes
     .append("line")
-    .attr("x1", -NODE_WIDTH / 2 + LAYER_WIDTH)
-    .attr("x2", -NODE_WIDTH / 2 + LAYER_WIDTH)
+    .attr("x1", -halfNodeWidth + LAYER_WIDTH)
+    .attr("x2", -halfNodeWidth + LAYER_WIDTH)
     .attr("y1", (d) => -getNonTestNodeHeight(d) / 2 + 8)
     .attr("y2", (d) => getNonTestNodeHeight(d) / 2 - 8)
     .attr("stroke", "rgba(15, 23, 42, 0.12)")
@@ -787,7 +980,7 @@ return style?.fill ?? "#ffe7d8";
   const layerLabels = nonTestNodes
     .append("text")
     .attr("class", "layer-label")
-    .attr("x", -NODE_WIDTH / 2 + 48)
+    .attr("x", -halfNodeWidth + 48)
     .attr("y", (d) => -getNonTestNodeHeight(d) / 2 + 12)
     .attr("text-anchor", "middle")
     .attr("font-size", 11)
@@ -810,7 +1003,7 @@ return layer?.label ?? "Layer";
   });
 
   const reusableIconSize = 24;
-  const reusableIconCenterX = -NODE_WIDTH / 2 + 48;
+  const reusableIconCenterX = -halfNodeWidth + 48;
   nonTestNodes
     .filter((d) => getNodeMeta(d)?.status === "reusable")
     .append("image")
@@ -824,8 +1017,8 @@ return layer?.label ?? "Layer";
 
   const columnRowHeight = 14;
   const columnRowGap = 3;
-  const columnTableWidth = NODE_WIDTH - LAYER_WIDTH - 44;
-  const columnTableX = -NODE_WIDTH / 2 + 96;
+  const columnTableWidth = nodeWidth - LAYER_WIDTH - 44;
+  const columnTableX = -halfNodeWidth + 96;
   const columnTables = nonTestNodes
     .filter(hasColumns)
     .append("g")
@@ -838,6 +1031,7 @@ return layer?.label ?? "Layer";
   columnTables.each(function (nodeDatum) {
     const columns = getColumns(nodeDatum);
     const tableGroup = d3.select(this);
+    const labelNodes = [];
     const rows = tableGroup
       .selectAll("g")
       .data(columns)
@@ -859,6 +1053,8 @@ return layer?.label ?? "Layer";
 
     const keyIconSize = 14;
     const keyIconMargin = 6;
+    const newBadgeSize = 16;
+    const newBadgeSpacing = 6;
     rows
       .filter((col) => col.isKey)
       .append("image")
@@ -872,15 +1068,63 @@ return layer?.label ?? "Layer";
       .attr("href", "icons/key.svg")
       .attr("xlink:href", "icons/key.svg");
 
-    rows
-      .append("text")
-      .attr("x", (col) => (col.isKey ? keyIconMargin + keyIconSize + 4 : 8))
-      .attr("y", columnRowHeight / 2)
-      .attr("alignment-baseline", "middle")
-      .attr("font-size", 12)
-      .attr("fill", "#212121")
-      .attr("font-weight", (col) => (col.isKey ? 600 : 500))
-      .text((col) => col.name);
+    rows.each(function (col) {
+      const rowGroup = d3.select(this);
+      const baseX = col.isKey ? keyIconMargin + keyIconSize + 4 : 8;
+      let textX = baseX;
+
+      if (col.isNew) {
+        const badgeY = (columnRowHeight - newBadgeSize) / 2;
+        rowGroup
+          .append("rect")
+          .attr("x", baseX)
+          .attr("y", badgeY)
+          .attr("width", newBadgeSize)
+          .attr("height", newBadgeSize)
+          .attr("rx", newBadgeSize / 2)
+          .attr("fill", "#f97316");
+
+        rowGroup
+          .append("text")
+          .attr("x", baseX + newBadgeSize / 2)
+          .attr("y", columnRowHeight / 2)
+          .attr("text-anchor", "middle")
+          .attr("alignment-baseline", "middle")
+          .attr("font-size", 10)
+          .attr("font-weight", 700)
+          .attr("letter-spacing", 0.4)
+          .attr("fill", "#ffffff")
+          .text("N");
+
+        textX = baseX + newBadgeSize + newBadgeSpacing;
+      }
+
+      const label = rowGroup
+        .append("text")
+        .attr("x", textX)
+        .attr("y", columnRowHeight / 2)
+        .attr("alignment-baseline", "middle")
+        .attr("font-size", 12)
+        .attr("fill", "#212121")
+        .attr("font-weight", col.isKey ? 600 : 500)
+        .text(col.name);
+
+      labelNodes.push({ node: label.node(), col, textX });
+    });
+
+    labelNodes.forEach(({ node, col, textX }) => {
+      const text = d3.select(node);
+      const maxWidth = Math.max(0, columnTableWidth - textX - 6);
+      let label = col.name;
+      text.text(label);
+      if (node.getComputedTextLength() <= maxWidth) {
+        return;
+      }
+      while (label.length > 0 && node.getComputedTextLength() > maxWidth) {
+        label = label.slice(0, -1);
+        text.text(`${label}\u2026`);
+      }
+    });
   });
 
   const testNodes = node.filter(isTestLayer);
@@ -894,7 +1138,7 @@ return layer?.label ?? "Layer";
 
   testNodes
     .append("text")
-    .attr("x", -NODE_WIDTH / 2 + 24)
+    .attr("x", -halfNodeWidth + 24)
     .attr("y", testLabelOffset)
     .attr("text-anchor", "start")
     .attr("font-size", 12)
@@ -905,7 +1149,7 @@ return layer?.label ?? "Layer";
   node
     .append("text")
     .attr("x", (d) =>
-isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
+      isTestLayer(d) ? -halfNodeWidth + 24 : -halfNodeWidth + 96
     )
     .attr("y", (d) => {
       if (isTestLayer(d)) {
@@ -930,7 +1174,7 @@ isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
   node
     .append("text")
     .attr("x", (d) =>
-isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
+      isTestLayer(d) ? -halfNodeWidth + 24 : -halfNodeWidth + 96
     )
     .attr("y", (d) => {
       if (isTestLayer(d)) {
@@ -959,11 +1203,11 @@ isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
   node
     .append("text")
     .attr("x", (d) =>
-isTestLayer(d)
-        ? -NODE_WIDTH / 2 + 24
+      isTestLayer(d)
+        ? -halfNodeWidth + 24
         : noteBelow(d)
         ? 0
-        : -NODE_WIDTH / 2 + 96
+        : -halfNodeWidth + 96
     )
     .attr("y", (d) =>
       isTestLayer(d)
@@ -993,7 +1237,7 @@ isTestLayer(d)
     .text((d) => getNodeMeta(d)?.note ?? "");
   node
     .append("foreignObject")
-    .attr("x", (d) => isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96)
+    .attr("x", (d) => (isTestLayer(d) ? -halfNodeWidth + 24 : -halfNodeWidth + 96))
     .attr("y", (d) => (isTestLayer(d) ? testNoteOffset : 32))
     .attr("width", 180)
     .attr("height", 40)

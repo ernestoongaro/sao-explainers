@@ -408,7 +408,13 @@ const scenarios = [
         status: "fresh",
         note: "Raw feed with unique test on column customer_id",
         notePlacement: "below",
-        noteFontSize: 13
+        noteFontSize: 13,
+        columns: [
+          { name: "customer_id", isKey: true },
+          { name: "first_name" },
+          { name: "last_name" },
+          { name: "email" }
+        ]
       },
       {
         id: "stg_customers",
@@ -417,7 +423,13 @@ const scenarios = [
         status: "built",
         statusLabel: "Test ran",
         note: "Column-aware unique test runs here",
-        notePlacement: "below"
+        notePlacement: "below",
+        columns: [
+          { name: "customer_id", isKey: true },
+          { name: "customer_name" },
+          { name: "email" },
+          { name: "signup_channel" }
+        ]
       },
       {
         id: "dim_customers",
@@ -426,7 +438,13 @@ const scenarios = [
         status: "reusable",
         statusLabel: "Test reused",
         note: "Reuses staging unique test",
-        notePlacement: "below"
+        notePlacement: "below",
+        columns: [
+          { name: "customer_id", isKey: true },
+          { name: "customer_name" },
+          { name: "loyalty_tier" },
+          { name: "lifetime_value" }
+        ]
       }
     ],
     links: [
@@ -438,15 +456,15 @@ const scenarios = [
 
 const statusStyles = {
   fresh: {
-    fill: "#d1fae5",
-    text: "#03543f",
-    stroke: "#6ee7b7",
-    label: "Source fresh"
+    fill: "#C8E6C9",
+    text: "#212121",
+    stroke: "#424242",
+    label: "Fresh source"
   },
   built: {
-    fill: "#ffe7d8",
-    text: "#7c2d12",
-    stroke: "#fe6703",
+    fill: "#81C784",
+    text: "#212121",
+    stroke: "#424242",
     label: "Model built"
   },
   blocked: {
@@ -456,16 +474,16 @@ const statusStyles = {
     label: "Build blocked"
   },
   stale: {
-    fill: "#fff7d6",
-    text: "#92400e",
-    stroke: "#fcd34d",
-    label: "Source stale"
+    fill: "#E0E0E0",
+    text: "#212121",
+    stroke: "#424242",
+    label: "Stale source"
   },
   "sla-ok": {
-    fill: "#ede9fe",
-    text: "#4338ca",
-    stroke: "#c4b5fd",
-    label: "Within SLA"
+    fill: "#FFE082",
+    text: "#212121",
+    stroke: "#424242",
+    label: "Fresh within SLA"
   },
   warning: {
     fill: "#fef3c7",
@@ -480,10 +498,10 @@ const statusStyles = {
     label: "Test passed"
   },
   reusable: {
-    fill: "#f8fafc",
-    text: "#475569",
-    stroke: "#94a3b8",
-    label: "Reused"
+    fill: "#BBDEFB",
+    text: "#212121",
+    stroke: "#424242",
+    label: "Reused model"
   }
 };
 
@@ -491,37 +509,38 @@ const layerStyles = {
   source: {
     label: "Source",
     fill: "rgba(255, 255, 255, 0.92)",
-    text: "#0f172a"
+    text: "#424242"
   },
   staging: {
     label: "Staging",
     fill: "rgba(255, 255, 255, 0.92)",
-    text: "#0f172a"
+    text: "#424242"
   },
   intermediate: {
     label: "Int",
     fill: "rgba(255, 255, 255, 0.92)",
-    text: "#0f172a"
+    text: "#424242"
   },
   dim: {
     label: "Mart",
     fill: "rgba(255, 255, 255, 0.92)",
-    text: "#0f172a"
+    text: "#424242"
   },
   fact: {
     label: "Mart",
     fill: "rgba(255, 255, 255, 0.92)",
-    text: "#0f172a"
+    text: "#424242"
   },
   test: {
     label: "Test",
     fill: "rgba(219, 234, 254, 0.65)",
-    text: "#075985"
+    text: "#424242"
   }
 };
 
 const NODE_WIDTH = 248;
 const NODE_HEIGHT = 80;
+const COLUMN_TABLE_EXTRA_HEIGHT = 48;
 const TEST_NODE_HEIGHT = 170; // Much taller for test nodes
 const LAYER_WIDTH = 84;
 const LAYOUT_NODE_WIDTH = NODE_HEIGHT + 220;
@@ -545,6 +564,12 @@ scenarios.forEach((scenario) => {
   const getLayer = (node) => getNodeMeta(node)?.layer;
   const isTestLayer = (node) => getLayer(node) === "test";
   const noteBelow = (node) => getNodeMeta(node)?.notePlacement === "below";
+  const getColumns = (node) => getNodeMeta(node)?.columns ?? [];
+  const hasColumns = (node) => getColumns(node).length > 0;
+  const getNonTestNodeHeight = (node) =>
+    hasColumns(node) ? NODE_HEIGHT + COLUMN_TABLE_EXTRA_HEIGHT : NODE_HEIGHT;
+  const getNodeHeight = (node) =>
+    isTestLayer(node) ? TEST_NODE_HEIGHT : getNonTestNodeHeight(node);
   const reusedCount = scenario.nodes.reduce(
     (total, node) => (node.status === "reusable" ? total + 1 : total),
     0
@@ -681,7 +706,7 @@ if (scenario.id === "column-aware-testing") {
     const src = link.source;
     const tgt = link.target;
     if (isTestLayer(tgt)) {
-      const elbowY = tgt.y + NODE_HEIGHT / 2;
+      const elbowY = tgt.y + getNodeHeight(tgt) / 2;
       link.points = [[src.x, src.y], [src.x, elbowY], [tgt.x, elbowY], [tgt.x, tgt.y]];
     } else {
       link.points = [[src.x, src.y], [tgt.x, tgt.y]];
@@ -721,10 +746,10 @@ isTestLayer(d.target) ? "12 6" : null
   node
     .append("rect")
     .attr("x", -NODE_WIDTH / 2)
-    .attr("y", (d) => isTestLayer(d) ? -TEST_NODE_HEIGHT / 2 : -NODE_HEIGHT / 2)
+    .attr("y", (d) => -getNodeHeight(d) / 2)
     .attr("width", NODE_WIDTH)
-    .attr("height", (d) => isTestLayer(d) ? TEST_NODE_HEIGHT : NODE_HEIGHT)
-    .attr("rx", (d) => (isTestLayer(d) ? 18 : NODE_HEIGHT / 2))
+    .attr("height", (d) => getNodeHeight(d))
+    .attr("rx", (d) => (isTestLayer(d) ? 18 : getNonTestNodeHeight(d) / 2))
     .attr("fill", (d) => {
       const style = getNodeStyle(d);
       return style?.fill ?? "#ffe7d8";
@@ -740,7 +765,7 @@ isTestLayer(d.target) ? "12 6" : null
   nonTestNodes
     .append("rect")
     .attr("x", -NODE_WIDTH / 2 + 16)
-    .attr("y", -NODE_HEIGHT / 2 + 12)
+    .attr("y", (d) => -getNonTestNodeHeight(d) / 2 + 12)
     .attr("width", 64)
     .attr("height", 32)
     .attr("rx", 16)
@@ -754,17 +779,16 @@ return style?.fill ?? "#ffe7d8";
     .append("line")
     .attr("x1", -NODE_WIDTH / 2 + LAYER_WIDTH)
     .attr("x2", -NODE_WIDTH / 2 + LAYER_WIDTH)
-    .attr("y1", -NODE_HEIGHT / 2 + 8)
-    .attr("y2", NODE_HEIGHT / 2 - 8)
+    .attr("y1", (d) => -getNonTestNodeHeight(d) / 2 + 8)
+    .attr("y2", (d) => getNonTestNodeHeight(d) / 2 - 8)
     .attr("stroke", "rgba(15, 23, 42, 0.12)")
     .attr("stroke-width", 1);
 
-  const layerBadgeCenterY = -NODE_HEIGHT / 2 + 12 + 16;
   const layerLabels = nonTestNodes
     .append("text")
     .attr("class", "layer-label")
     .attr("x", -NODE_WIDTH / 2 + 48)
-    .attr("y", -NODE_HEIGHT / 2 + 12)
+    .attr("y", (d) => -getNonTestNodeHeight(d) / 2 + 12)
     .attr("text-anchor", "middle")
     .attr("font-size", 11)
     .attr("font-weight", 600)
@@ -781,8 +805,82 @@ return layer?.label ?? "Layer";
     const textNode = d3.select(this);
     const bbox = this.getBBox();
     const currentCenter = bbox.y + bbox.height / 2;
-    const offset = layerBadgeCenterY - currentCenter;
-    textNode.attr("dy", offset);
+    const targetCenter = -getNonTestNodeHeight(textNode.datum()) / 2 + 12 + 16;
+    textNode.attr("dy", targetCenter - currentCenter);
+  });
+
+  const reusableIconSize = 24;
+  const reusableIconCenterX = -NODE_WIDTH / 2 + 48;
+  nonTestNodes
+    .filter((d) => getNodeMeta(d)?.status === "reusable")
+    .append("image")
+    .attr("class", "reusable-icon")
+    .attr("x", reusableIconCenterX - reusableIconSize / 2)
+    .attr("y", (d) => -getNonTestNodeHeight(d) / 2 + 12 + 16 + 12)
+    .attr("width", reusableIconSize)
+    .attr("height", reusableIconSize)
+    .attr("href", "icons/cycle.svg")
+    .attr("xlink:href", "icons/cycle.svg");
+
+  const columnRowHeight = 14;
+  const columnRowGap = 3;
+  const columnTableWidth = NODE_WIDTH - LAYER_WIDTH - 44;
+  const columnTableX = -NODE_WIDTH / 2 + 96;
+  const columnTables = nonTestNodes
+    .filter(hasColumns)
+    .append("g")
+    .attr("class", "column-table")
+    .attr("transform", (d) => {
+      const tableY = -getNonTestNodeHeight(d) / 2 + 56;
+      return `translate(${columnTableX}, ${tableY})`;
+    });
+
+  columnTables.each(function (nodeDatum) {
+    const columns = getColumns(nodeDatum);
+    const tableGroup = d3.select(this);
+    const rows = tableGroup
+      .selectAll("g")
+      .data(columns)
+      .enter()
+      .append("g")
+      .attr("transform", (d, index) => {
+        const rowY = index * (columnRowHeight + columnRowGap);
+        return `translate(0, ${rowY})`;
+      });
+
+    rows
+      .append("rect")
+      .attr("width", columnTableWidth)
+      .attr("height", columnRowHeight)
+      .attr("rx", 6)
+      .attr("fill", "rgba(255, 255, 255, 0.85)")
+      .attr("stroke", "rgba(66, 66, 66, 0.24)")
+      .attr("stroke-width", 0.8);
+
+    const keyIconSize = 14;
+    const keyIconMargin = 6;
+    rows
+      .filter((col) => col.isKey)
+      .append("image")
+      .attr("x", keyIconMargin)
+      .attr(
+        "y",
+        (columnRowHeight - keyIconSize) / 2
+      )
+      .attr("width", keyIconSize)
+      .attr("height", keyIconSize)
+      .attr("href", "icons/key.svg")
+      .attr("xlink:href", "icons/key.svg");
+
+    rows
+      .append("text")
+      .attr("x", (col) => (col.isKey ? keyIconMargin + keyIconSize + 4 : 8))
+      .attr("y", columnRowHeight / 2)
+      .attr("alignment-baseline", "middle")
+      .attr("font-size", 12)
+      .attr("fill", "#212121")
+      .attr("font-weight", (col) => (col.isKey ? 600 : 500))
+      .text((col) => col.name);
   });
 
   const testNodes = node.filter(isTestLayer);
@@ -809,7 +907,12 @@ return layer?.label ?? "Layer";
     .attr("x", (d) =>
 isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
     )
-    .attr("y", (d) => (isTestLayer(d) ? testNameOffset : -4))
+    .attr("y", (d) => {
+      if (isTestLayer(d)) {
+        return testNameOffset;
+      }
+      return hasColumns(d) ? -getNonTestNodeHeight(d) / 2 + 28 : -4;
+    })
     .attr("text-anchor", "start")
     .attr("alignment-baseline", (d) =>
       isTestLayer(d) ? "hanging" : "middle"
@@ -829,7 +932,12 @@ isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
     .attr("x", (d) =>
 isTestLayer(d) ? -NODE_WIDTH / 2 + 24 : -NODE_WIDTH / 2 + 96
     )
-    .attr("y", (d) => (isTestLayer(d) ? testNoteOffset - 24 : 14))
+    .attr("y", (d) => {
+      if (isTestLayer(d)) {
+        return testNoteOffset - 24;
+      }
+      return hasColumns(d) ? -getNonTestNodeHeight(d) / 2 + 48 : 14;
+    })
     .attr("text-anchor", "start")
     .attr("alignment-baseline", (d) =>
       isTestLayer(d) ? "hanging" : "middle"
@@ -861,7 +969,9 @@ isTestLayer(d)
       isTestLayer(d)
         ? testNoteOffset
         : noteBelow(d)
-        ? NODE_HEIGHT / 2 + 20
+        ? getNonTestNodeHeight(d) / 2 + 20
+        : hasColumns(d)
+        ? -getNonTestNodeHeight(d) / 2 + 72
         : 32
     )
     .attr("text-anchor", (d) =>
